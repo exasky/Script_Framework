@@ -1,0 +1,155 @@
+#!/bin/sh
+
+#   To use this framework 
+#           You have to implement some functions:
+#
+#   usage:          To explain how to use your script
+#   declare_env:    To declare all variables in your script
+#   check_env:      To check script's prerequisites to a good execution
+#                           All script's parameters are passed through
+#   main:           To launch the script execution
+#                           All script's parameters are passed through
+#
+#
+#           You have to follow some rules:
+#
+#   - Use "source 'path_to_script_framework'" at the beginning of yours
+#   - Declare variables in declare_env function only
+#   - Do not call declare_env and check_env
+#   - Do not use commands out of a function
+#       @ Ignoring this may cause issues at the execution
+#       @ The main function is automatically called
+#   - If you want to use "recursive sourcing" (eg. Source a file that sources a file, etc..)
+#       @ Declare the declare_source function with lines like: 'echo "/path/to/your_script.sh"'
+#       @ When "recursice sourcing" is used, you can declare 'declare & check _env' methods in your 
+#			sourced files. You don't have to declare them in your main script anymore
+#       @ Be careful when using 'multi sourcing': do not declare functions with the same name,
+#           variables with the same name, etc.. Except for declare_env, check_env & declare_source
+#   
+#
+#   Author:     SIMAR Jeremy
+#   Version:    0.2
+#
+#   Change log:
+#       V0.1 : Initial
+#       V0.2 : Add recursive sourcing
+#
+#
+
+
+################# __ifndef__ #################
+MAIN_SCRIPT=$(cd "$(dirname "$0")" && pwd -P)"/$0"
+script_path=$(echo $MAIN_SCRIPT | sed -e "s@/@_@g" -e "s@\.@_@g")
+define_var="ALREADY_SOURCED_$script_path"
+[[ ! -z ${!define_var} ]] && return
+export ALREADY_SOURCED_$script_path="defined"
+################# __ifndef__ #################
+
+source "/home/simar/scripts/logFunctions.sh"
+
+FILES_TO_BE_SOURCED=""
+
+##
+# Method that check if an element belongs to an list
+# $1 : The list
+# $2 : The element
+##
+list_contains() {
+    for element in $1; do
+        [[ $element == $2 ]] && return 0
+    done
+    return 1
+}
+
+##
+# Method that check if a function exists
+# $1 : The function to be checked
+##
+function_exists() { type $1 &> /dev/null; }
+
+##
+# Method that unset framework function
+##
+unset_functions() {
+    unset -f declare_source
+    unset -f check_env
+    unset -f declare_env
+}
+
+##
+# Method that call declare_env method from the current sourced file
+##
+internal_declare_env() {
+    declare_env_flag=1
+    declare_env
+}
+
+##
+# Method that call check_env method from the current sourced file
+##
+internal_check_env() {
+    check_env_flag=1
+    check_env
+}
+
+##
+# Method that set FILES_TO_BE_SOURCED var with all the files which have to be sourced
+# TODO check le deadlock d'inclusion circulaire
+##
+get_files_to_be_sourced_by_depth() {
+    local files_to_source=$(declare_source)
+
+    for file in $files_to_source ; do
+        local currentFile=$file
+        unset_functions
+        source $currentFile
+        function_exists declare_source && get_files_to_be_sourced_by_depth
+        ! list_contains "$FILES_TO_BE_SOURCED" "$currentFile" && FILES_TO_BE_SOURCED="$FILES_TO_BE_SOURCED "$currentFile
+    done
+}
+
+##
+# Method that call declare_env and check_env from all the sourced files
+##
+internal_declare_sources() {
+    get_files_to_be_sourced_by_depth
+
+    for file in $FILES_TO_BE_SOURCED ; do
+        unset_functions
+        source $file
+        function_exists declare_env && internal_declare_env
+        function_exists check_env   && internal_check_env
+    done
+    unset_functions
+    source $MAIN_SCRIPT
+}
+
+##
+# Method that check the environment before launching the main function
+##
+internal_check_functions() {
+    source $MAIN_SCRIPT
+
+    ! function_exists usage && logFatal "Function usage not implemented"
+    ! function_exists main  && logFatal "Function main not implemented"
+
+    function_exists declare_source && internal_declare_sources
+
+    [[ $declare_env_flag != 1 ]] && ! function_exists declare_env && logFatal "Function declare_env not implemented"
+    [[ $check_env_flag != 1 ]]   && ! function_exists check_env   && logFatal "Function check_env not implemented"
+}
+
+##
+# Main method
+##
+internal_main() {
+    internal_check_functions
+
+    # These methods aren't mandatory if the main script sources files that contains them
+    function_exists declare_env && declare_env
+    function_exists check_env   && check_env $*
+
+    main $*
+}
+
+internal_main $*

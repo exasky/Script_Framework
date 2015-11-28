@@ -1,0 +1,187 @@
+################################################################################
+#   Welcome in the debugger part of this framework
+#
+#   Author:     SIMAR Jeremy
+#   Version:    1.0
+#
+#   Change log:
+#       V0.1 : Initial
+#       V0.2 : Add options to breakpoint function
+#       V0.3 : Add stacktrace
+#       V0.4 : Add around line display
+#       V0.5 : Add next_instruction & continue
+#       V1.0 : First release - Light debugger, only for simple
+#
+#
+#   WARNING: The debugger does not work with keywords: if, while, for, etc..
+#            The debugger does not work with step in & step out of functions
+#
+#            To use only for print/modify variables or for simple parts
+#
+################################################################################
+
+# Global variable that has to be to be initialized only one time
+DEBUG_BREAKPOINT_ACTIVATED=true
+
+################################################################################
+#
+#   USABLE DEBUG FUNCTIONS
+#
+################################################################################
+
+##
+# Function that pause the script execution
+##
+breakpoint() {
+    DEBUG_init_internal_variables
+    DEBUG_goto_next_valid_instruction
+    while $DEBUG_BREAKPOINT_ACTIVATED && $DEBUG_CONTINUE; do
+        echo
+        read -p "(DEBUG - h for help) $(basename ${BASH_SOURCE[1]}):$DEBUG_CURRENT_LINE_NUMBER > " user_command
+        
+        [[ $user_command = "" ]] && user_command=$SF_PREVIOUS_USER_COMMAND
+        SF_PREVIOUS_USER_COMMAND=$user_command
+        
+        case $user_command in
+            c )        DEBUG_continue;;
+            h | help)  DEBUG_display_breakpoint_help;;
+            l | list)  DEBUG_display_around_lines;;
+            n | next)  DEBUG_next_instruction;;
+            q | quit)  DEBUG_BREAKPOINT_ACTIVATED=false; break;;
+            s | stack) DEBUG_display_stacktrace;;
+            \$* )      eval "echo $user_command";;
+            * )        eval $user_command;;
+        esac
+    done
+}
+
+################################################################################
+#
+#   INTERNAL DEBUG FUNCTIONS
+#
+################################################################################
+DEBUG_display_breakpoint_help() {
+    echo
+    echo "Short help description (under construct)"
+    echo -e "h:\t To display this help"
+    echo -e "c:\t To run to the next breakpoint"
+    echo -e "l:\t To display current location"
+    echo -e "n:\t To execute the current one and go to the next instruction"
+    echo -e "q:\t To dismiss all next breakpoints"
+    echo -e "s:\t To display stacktrace"
+    echo -e "\"\$foo\":\t To display the foo variable"
+    echo -e "Enter:\t Re-execute the last command"
+    echo
+    logSWarn "WARNING: The debugger does not work with keywords: if, while, for, etc.."
+    logSWarn "\t The debugger does not work with step in & step out of functions"
+    logSWarn "\t To use only for print/modify variables or for simple parts"
+}
+
+DEBUG_init_internal_variables() {
+    DEBUG_PREVIOUS_USER_COMMAND=""
+    DEBUG_CURRENT_LINE_NUMBER=$((${BASH_LINENO[1]} + 1))
+    DEBUG_CURRENT_STACK=("${BASH_SOURCE[@]}")
+    DEBUG_CURRENT_INSTRUCTION=""
+    DEBUG_CONTINUE=true
+}
+
+##
+# Function that displays 3 lines before and after from the current line of where
+#   the beakpoint function was called
+##
+DEBUG_display_around_lines() {
+    local current_file="${BASH_SOURCE[2]}"
+    local current_line_number="$DEBUG_CURRENT_LINE_NUMBER"
+    
+    sed "$((current_line_number-3))"','"$((current_line_number + 3))"'!d' $current_file | sed '4s/^ />/'
+}
+
+##
+# Function that displays the stacktrace
+##
+DEBUG_display_stacktrace() {
+    local -i start=3
+    local -i end=${#BASH_SOURCE[@]}
+
+    echo -e "\n\tStacktrace (last called is first):" 1>&2
+
+    echo -e "\t\t${FUNCNAME[2]}() in ${BASH_SOURCE[2]}:${DEBUG_CURRENT_LINE_NUMBER}" 1>&2
+    for ((i=${start}; i < ${end}; i++)); do
+        j=$(( $i - 1 ))
+        local function="${FUNCNAME[$i]}"
+        local file="${BASH_SOURCE[$i]}"
+        local line="${BASH_LINENO[$j]}"
+        echo -e "\t\t${function}() in ${file}:${line}" 1>&2
+    done
+}
+
+##
+# Function that execute the current instruction and go to the next one
+##
+DEBUG_next_instruction() {
+    # At the first call, DEBUG_CURRENT_INSTRUCTION has already been set
+    eval "$DEBUG_CURRENT_INSTRUCTION"
+    if [[ $? != 0 ]] ; then
+        logSWarn "Instruction  \"$DEBUG_CURRENT_INSTRUCTION\"  not supported. Continue.."
+        DEBUG_continue
+        return
+    fi
+    DEBUG_goto_next_valid_instruction
+}
+
+##
+# Function that set the DEBUG_CURRENT_INSTRUCTION variable by retrieving
+#   the next valid instruction
+##
+DEBUG_goto_next_valid_instruction() {
+    [ ! -z "$DEBUG_CURRENT_INSTRUCTION" ] && DEBUG_goto_next_line
+    DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_STACK[2]})
+    while ! DEBUG_current_instruction_is_valid; do
+        DEBUG_goto_next_line
+        DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_STACK[2]})
+    done
+
+    [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_continue
+}
+
+DEBUG_current_instruction_is_valid() {
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]]
+}
+
+DEBUG_continue() {
+    DEBUG_ON
+    trap 'DEBUG_extdebug_trap $BASH_COMMAND' DEBUG
+    DEBUG_CONTINUE=false
+}
+
+##
+# Function that set the current line number to the next one
+##
+DEBUG_goto_next_line() {
+    DEBUG_CURRENT_LINE_NUMBER=$((DEBUG_CURRENT_LINE_NUMBER+1))
+}
+
+DEBUG_ON() {
+    shopt -s extdebug
+}
+
+DEBUG_OFF() {
+    shopt -u extdebug
+}
+
+# return 0 => execute instruction
+# return 1 => don't execute instruction
+DEBUG_extdebug_trap() {
+    # This test allows the execution of debugger.sh instructions
+    [[ ${BASH_SOURCE[1]} == *debugger.sh ]] && return 0;
+        
+    #This test prevent re-execution of code:
+    #   For example, if the DEBUG_LINE is > to the current file line
+    #                then the current_line won't be executed because the 
+    #                debugger has already executed this line
+    [[ $DEBUG_CURRENT_LINE_NUMBER != ${BASH_LINENO[0]} ]] && return 1    
+    
+    # When calling continue, this test afford to stop debugging when the current_debug_line
+    # is equal to current_script_line 
+    [[ $DEBUG_CURRENT_LINE_NUMBER == ${BASH_LINENO[0]} ]] && DEBUG_OFF && return 0
+}

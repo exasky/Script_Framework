@@ -1,0 +1,75 @@
+################################################################################
+#   Welcome in the debugger part of this framework
+#
+#   Author:     SIMAR Jeremy
+#   Version:    0.3
+#
+#   Change log:
+#       V0.1 : Initial
+#       V0.2 : Add options to breakpoint function
+#       V0.3 : Add stacktrace
+#
+################################################################################
+
+SF_PREVIOUS_USER_COMMAND=""
+SF_BREAKPOINT_ACTIVATED=true
+
+################################################################################
+#
+#   USABLE DEBUG FUNCTIONS
+#
+################################################################################
+
+##
+# Function that pause the script execution
+##
+breakpoint() {
+    while $SF_BREAKPOINT_ACTIVATED; do
+        #echo "Type h for help"
+        echo
+        read -p "(DEBUG - h for help) $(basename ${BASH_SOURCE[1]}):${BASH_LINENO[0]} > " user_command
+        
+        [[ $user_command = "" ]] && user_command=$SF_PREVIOUS_USER_COMMAND
+        SF_PREVIOUS_USER_COMMAND=$user_command
+        
+        case $user_command in
+            c )        break;;
+            h | help)  SF_display_breakpoint_help;;
+            q | quit)  SF_BREAKPOINT_ACTIVATED=false; break;;
+            s | stack) SF_display_stacktrace;;
+            \$* )      eval "echo $user_command";;
+            * )        eval $user_command;;
+        esac
+    done
+}
+
+################################################################################
+#
+#   INTERNAL DEBUG FUNCTIONS
+#
+################################################################################
+SF_display_breakpoint_help(){
+    echo
+    echo "Short help description (under construct)"
+    echo -e "h:\t To display this help"
+    echo -e "c:\t To run to the next breakpoint"
+    echo -e "q:\t To dismiss all next breakpoints"
+    echo -e "s:\t To display stacktrace"
+    echo -e "\"\$foo\":\t To display the foo variable"
+    echo -e "Enter:\t Re-execute the last command"
+    echo
+}
+
+SF_display_stacktrace() {
+    local -i start=2
+    local -i end=${#BASH_SOURCE[@]}
+
+    echo "Stacktrace (last called is first):" 1>&2
+    for ((i=${start}; i < ${end}; i++)); do
+        j=$(( $i - 1 ))
+        local function="${FUNCNAME[$i]}"
+        local file="${BASH_SOURCE[$i]}"
+        local line="${BASH_LINENO[$j]}"
+        echo "     ${function}() in ${file}:${line}" 1>&2
+    done
+}
