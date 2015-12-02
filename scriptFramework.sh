@@ -99,7 +99,7 @@ SF_declare_env() {
     local PATH_TO_FW="${BASH_SOURCE[0]%/*}"
 
     source "$PATH_TO_FW/logFunctions.sh"
-    source "$PATH_TO_FW/debugger.sh"
+    source "$PATH_TO_FW/debugger.sh" "$@"
     source "$PATH_TO_FW/error.sh"
 
     FILES_TO_BE_SOURCED=""
@@ -217,7 +217,7 @@ SF_internal_check_functions() {
 # Main function
 ##
 SF_internal_main() {
-    SF_declare_env
+    SF_declare_env "$@"
     SF_internal_check_functions
 
     source $MAIN_SCRIPT
@@ -226,7 +226,7 @@ SF_internal_main() {
     SF_if_function_declared $declare_env_function && $declare_env_function
     SF_if_function_declared $check_env_function   && $check_env_function $*
 
-    main $*
+    main "$@"
 }
 
-SF_internal_main $*
+SF_internal_main "$@"

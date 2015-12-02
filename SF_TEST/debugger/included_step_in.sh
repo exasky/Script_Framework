@@ -7,16 +7,22 @@ included_function()
 func_with_parameters() {
     
     echo $1
-    echo $2
+
+    inner_func_with_params "my" "params"
     breakpoint
-    echo "INNER"
+    echo $2
     
-    inner_func
     echo "INNER"
-    echo "w"
 }
 
 inner_func() {
     
     echo "plop"
+}
+
+inner_func_with_params() {
+    echo $1
+    echo $2
+
+    echo "fin params2"
 }

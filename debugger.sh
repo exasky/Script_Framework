@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.3
+#   Version:    1.4
 #
 #   Change log:
 #       V0.1 : Initial
@@ -17,18 +17,22 @@
 #           V1.3.1 : Correct bug when using "continue" after a "step in"
 #           V1.3.2 : Correct bug if using "next" when a breakpoint is set in
 #                    an inner-function
-#       V1.4 : Add "argument processin" when stepping in (TODO)
+#       V1.4 : Add "argument processing" when stepping in
 #
 #
 #   WARNING: The debugger does not work with keywords: if, while, for, etc..
-#            The debugger does not process arguments when stepping in
 #            To use only for print/modify variables or for simple parts
 #
 ################################################################################
 
 # Global variable that has to be to be initialized only one time
 DEBUG_BREAKPOINT_ACTIVATED=true
-
+# Used for getting argument params (in case of a breakpoint in the main)
+local programm_arguments_formatted=""
+for arg in "$@"; do
+    programm_arguments_formatted=$programm_arguments_formatted" \"$arg\""
+done
+add_end_array DEBUG_CURRENT_ARGS "$programm_arguments_formatted"
 ################################################################################
 #
 #   USABLE DEBUG FUNCTIONS
@@ -111,8 +115,7 @@ DEBUG_init_internal_variables() {
         DEBUG_CURRENT_FUNCTION=("${FUNCNAME[@]:2}")
         DEBUG_CURRENT_LINENO=("${BASH_LINENO[@]:2}")
     fi
-    
-    DEBUG_CURRENT_ARGS=()
+
     DEBUG_PREVIOUS_USER_COMMAND=""
     DEBUG_CURRENT_LINE_NUMBER=$((${BASH_LINENO[1]} + 1))
     DEBUG_CURRENT_INSTRUCTION=""
@@ -171,20 +174,14 @@ DEBUG_step_in() {
         push_into_array DEBUG_CURRENT_SOURCE $function_file
         push_into_array DEBUG_CURRENT_FUNCTION $function_name
         push_into_array DEBUG_CURRENT_LINENO $DEBUG_CURRENT_LINE_NUMBER
-        
-        eval DEBUG_get_current_arguments $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/$function_name //" -e "s/\"/\\\"/g")
+        push_into_array DEBUG_CURRENT_ARGS "$(echo $DEBUG_CURRENT_INSTRUCTION | sed "s/$function_name //")"
+         
         DEBUG_CURRENT_LINE_NUMBER=$function_line
         DEBUG_goto_next_valid_instruction
         
     else
         DEBUG_next_instruction
     fi
-}
-
-DEBUG_get_current_arguments() {
-    for arg in "$@"; do
-        add_end_array DEBUG_CURRENT_ARGS "$arg"
-    done
 }
 
 ##
@@ -202,11 +199,23 @@ DEBUG_next_instruction() {
     DEBUG_goto_next_valid_instruction
 }
 
+##
+# Function that execute the current instruction 
+##
 DEBUG_execute_current_instruction() {
-    # TODO Si $X avec X€[0-9] alors un substring avec DEBUG_CURRENT_ARGS
-    # WARN Avoir une stack d'arguments en fonction de la ou on est.. Si possible
-    DEBUG_CURRENT_INSTRUCTION=$(echo $DEBUG_CURRENT_INSTRUCTION | sed "s/\$1/${DEBUG_CURRENT_ARGS[0]}/")
+    eval DEBUG_set_args_in_current_instruction "${DEBUG_CURRENT_ARGS[0]}"    
     eval "$DEBUG_CURRENT_INSTRUCTION"
+}
+
+##
+# Function that set the correct parameters in the DEBUG_CURRENT_INSTRUCTION 
+##
+DEBUG_set_args_in_current_instruction() {
+    local i=0
+    for arg in "$@"; do
+        i=$((i+1))
+        DEBUG_CURRENT_INSTRUCTION=$(echo $DEBUG_CURRENT_INSTRUCTION | sed "s/\$$i/$arg/")
+    done
 }
 
 ##
@@ -249,9 +258,11 @@ DEBUG_step_out_function() {
     DEBUG_CURRENT_LINE_NUMBER=${DEBUG_CURRENT_LINENO[0]}
     
     # Re-align the current stack by removing the current element
+    unset DEBUG_CURRENT_ARGS[0]
     unset DEBUG_CURRENT_SOURCE[0]
     unset DEBUG_CURRENT_LINENO[0]
     unset DEBUG_CURRENT_FUNCTION[0]
+    DEBUG_CURRENT_ARGS=("${DEBUG_CURRENT_ARGS[@]}")
     DEBUG_CURRENT_SOURCE=("${DEBUG_CURRENT_SOURCE[@]}")
     DEBUG_CURRENT_LINENO=("${DEBUG_CURRENT_LINENO[@]}")
     DEBUG_CURRENT_FUNCTION=("${DEBUG_CURRENT_FUNCTION[@]}")

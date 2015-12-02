@@ -40,6 +40,8 @@ step_in_2() {
 #####################################
 
 main() {
+    breakpoint
+    echo $1
     echo "MAIN"
     #breakpoint
     step_in_1
