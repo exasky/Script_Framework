@@ -121,7 +121,6 @@ DEBUG_init_internal_variables() {
     DEBUG_CURRENT_INSTRUCTION=""
     DEBUG_CONTINUE=true
 }
-
 ##
 # Function that displays lines around the current line
 ##
@@ -130,11 +129,16 @@ DEBUG_display_around_lines() {
     local current_line_number="$DEBUG_CURRENT_LINE_NUMBER"
     
     # This is used to avoid errors when the first line is < 3
-    local middle=4
     local first_line=$((current_line_number-3))
+    local middle=$((first_line + 3))
     [ $first_line -lt 1 ] && first_line=1 && middle=$DEBUG_CURRENT_LINE_NUMBER
     
-    sed "$first_line"','"$((current_line_number + 3))"'!d' $current_file | sed "$middle"'s/^ />/'
+    for (( i=${first_line}; i <= $((current_line_number + 3)); i++)); do
+        printf "$i."
+        [[ "$i" == "$middle" ]] && printf " >"
+        printf "\t"
+        echo "$(sed "$i"'!d' $current_file)"
+    done
 }
 
 ##
