@@ -21,7 +21,7 @@
 ################################################################################
 
 ################# __ifndef__ #################
-MAIN_SCRIPT=$(cd "$(dirname "$0")" && pwd -P)"/$0"
+MAIN_SCRIPT=$(cd "$(dirname "$0")" && pwd -P)"/$(basename $0)"
 script_path=$(echo $MAIN_SCRIPT | sed -e "s@/@_@g" -e "s@\.@_@g")
 define_var="ALREADY_SOURCED_$script_path"
 [[ ! -z ${!define_var} ]] && return
