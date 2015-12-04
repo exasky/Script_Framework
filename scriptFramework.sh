@@ -22,7 +22,7 @@
 
 ################# __ifndef__ #################
 MAIN_SCRIPT=$(cd "$(dirname "$0")" && pwd -P)"/$(basename $0)"
-script_path=$(echo $MAIN_SCRIPT | sed -e "s@/@_@g" -e "s@\.@_@g")
+script_path=$(echo $MAIN_SCRIPT | sed -e "s@/@_@g" -e "s@\.@_@g" -e "s@-@_@")
 define_var="ALREADY_SOURCED_$script_path"
 [[ ! -z ${!define_var} ]] && return
 export ALREADY_SOURCED_$script_path="defined"
