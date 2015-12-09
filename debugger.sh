@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.4
+#   Version:    1.5b
 #
 #   Change log:
 #       V0.1 : Initial
@@ -18,6 +18,7 @@
 #           V1.3.2 : Correct bug if using "next" when a breakpoint is set in
 #                    an inner-function
 #       V1.4 : Add "argument processing" when stepping in
+#       V1.5 : IF processing (in progress)
 #
 #
 #   WARNING: The debugger does not work with keywords: if, while, for, etc..
@@ -54,6 +55,7 @@ breakpoint() {
 
         case $user_command in
             c )        DEBUG_continue;;
+            cls )      clear;;
             h | help)  DEBUG_display_breakpoint_help;;
             l | list)  DEBUG_display_around_lines;;
             n | next)  DEBUG_next_instruction;;
@@ -82,10 +84,10 @@ DEBUG_display_breakpoint_help() {
     echo -e "s:\t To go into the current instruction"
     echo -e "t:\t To display stacktrace"
     echo -e "\"\$foo\":\t To display the foo variable"
+    echo -e "cls:\t To clear the screen"
     echo -e "Enter:\t Re-execute the last command"
     echo
     logSWarn "WARNING: The debugger does not work with keywords: if, while, for, etc.."
-    logSWarn "\t The debugger does not process arguments when stepping in"
     logSWarn "\t To use only for print/modify variables or for simple parts"
 }
 
@@ -133,7 +135,7 @@ DEBUG_display_around_lines() {
     local middle=$((first_line + 3))
     [ $first_line -lt 1 ] && first_line=1 && middle=$DEBUG_CURRENT_LINE_NUMBER
     
-    for (( i=${first_line}; i <= $((current_line_number + 3)); i++)); do
+    for (( i=${first_line}; i <= $((current_line_number + 5)); i++)); do
         printf "$i."
         [[ "$i" == "$middle" ]] && printf " >"
         printf "\t"
@@ -194,7 +196,7 @@ DEBUG_step_in() {
 DEBUG_next_instruction() {
     # At the first call, DEBUG_CURRENT_INSTRUCTION has already been 
     DEBUG_execute_current_instruction
-    
+
     if [[ $? != 0 ]] ; then
         logSWarn "Instruction  \"$DEBUG_CURRENT_INSTRUCTION\"  not supported. Continue.."
         DEBUG_continue
@@ -207,8 +209,14 @@ DEBUG_next_instruction() {
 # Function that execute the current instruction 
 ##
 DEBUG_execute_current_instruction() {
-    eval DEBUG_set_args_in_current_instruction "${DEBUG_CURRENT_ARGS[0]}"    
-    eval "$DEBUG_CURRENT_INSTRUCTION"
+    eval DEBUG_set_args_in_current_instruction "${DEBUG_CURRENT_ARGS[0]}"
+    if [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] || [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]]; then
+        if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^if//" -e "s/^elif//" -e "s/then$//") ; then
+            DEBUG_goto_else_elif
+        fi
+    else
+        eval "$DEBUG_CURRENT_INSTRUCTION"
+    fi
 }
 
 ##
@@ -220,6 +228,42 @@ DEBUG_set_args_in_current_instruction() {
         i=$((i+1))
         DEBUG_CURRENT_INSTRUCTION=$(echo $DEBUG_CURRENT_INSTRUCTION | sed "s/\$$i/$arg/")
     done
+}
+
+##
+# Function that go to the next else of elif statement  
+##
+DEBUG_goto_else_elif() {
+    local if_depth=1
+    local current_line
+
+    while [ $if_depth != 0 ]; do
+        DEBUG_goto_next_line
+        current_line=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
+        [[ $current_line == if* ]] && if_depth=$((if_depth+1))
+        [[ $current_line == fi ]] && if_depth=$((if_depth-1))
+        [[ $current_line == elif* ]] && if_depth=$((if_depth-1))
+        [[ $current_line == else* ]] && if_depth=$((if_depth-1))
+    done
+    
+    [[ $current_line == elif* ]] && DEBUG_goto_previous_line
+    return 0
+}
+
+##
+# Function that go to the next fi statement  
+##
+DEBUG_goto_fi() {
+    local if_depth=1
+    local current_line
+
+    while [ $if_depth != 0 ]; do
+        DEBUG_goto_next_line
+        current_line=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
+        [[ $current_line == if* ]] && if_depth=$((if_depth+1))
+        [[ $current_line == fi ]] && if_depth=$((if_depth-1))
+    done
+    return 0
 }
 
 ##
@@ -235,11 +279,16 @@ DEBUG_goto_next_valid_instruction() {
     done
 
     [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "else" ]] && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
 }
 
 DEBUG_current_instruction_is_valid() {
-    #               SKIP BREAKPOINT                                    SKIP EMPTY LINES                            SKIP COMMENTED LINES                            SKIP LINES STARTING WITH '{'
-    [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != \#* ]] && [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" != "{" ]]
+    #               SKIP BREAKPOINT                                    SKIP EMPTY LINES               
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]] && \
+    #             SKIP COMMENTED LINES                            SKIP LINES STARTING WITH '{'
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != \#* ]] && [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" != "{" ]] && \
+    #
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "then" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "fi" ]]
 }
 
 ##
@@ -248,6 +297,13 @@ DEBUG_current_instruction_is_valid() {
 DEBUG_continue() {
     DEBUG_ON
     DEBUG_CONTINUE=false
+}
+
+##
+# Function that set the current line number to the previous one
+##
+DEBUG_goto_previous_line() {
+    DEBUG_CURRENT_LINE_NUMBER=$((DEBUG_CURRENT_LINE_NUMBER-1))
 }
 
 ##
