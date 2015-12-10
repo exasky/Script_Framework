@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.5b
+#   Version:    1.5
 #
 #   Change log:
 #       V0.1 : Initial
@@ -18,10 +18,10 @@
 #           V1.3.2 : Correct bug if using "next" when a breakpoint is set in
 #                    an inner-function
 #       V1.4 : Add "argument processing" when stepping in
-#       V1.5 : IF processing (in progress)
+#       V1.5 : IF processing
 #
 #
-#   WARNING: The debugger does not work with keywords: if, while, for, etc..
+#   WARNING: The debugger does not work with keywords: while, for, etc..
 #            To use only for print/modify variables or for simple parts
 #
 ################################################################################
@@ -87,7 +87,7 @@ DEBUG_display_breakpoint_help() {
     echo -e "cls:\t To clear the screen"
     echo -e "Enter:\t Re-execute the last command"
     echo
-    logSWarn "WARNING: The debugger does not work with keywords: if, while, for, etc.."
+    logSWarn "WARNING: The debugger does not work with keywords: while, for, etc.."
     logSWarn "\t To use only for print/modify variables or for simple parts"
 }
 
@@ -122,6 +122,7 @@ DEBUG_init_internal_variables() {
     DEBUG_CURRENT_LINE_NUMBER=$((${BASH_LINENO[1]} + 1))
     DEBUG_CURRENT_INSTRUCTION=""
     DEBUG_CONTINUE=true
+    DEBUG_IF_TEST_OK=false
 }
 ##
 # Function that displays lines around the current line
@@ -213,6 +214,8 @@ DEBUG_execute_current_instruction() {
     if [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] || [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]]; then
         if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^if//" -e "s/^elif//" -e "s/then$//") ; then
             DEBUG_goto_else_elif
+        else #Case when go into the current if/elif
+            DEBUG_IF_TEST_OK=true
         fi
     else
         eval "$DEBUG_CURRENT_INSTRUCTION"
@@ -263,6 +266,8 @@ DEBUG_goto_fi() {
         [[ $current_line == if* ]] && if_depth=$((if_depth+1))
         [[ $current_line == fi ]] && if_depth=$((if_depth-1))
     done
+    
+    DEBUG_IF_TEST_OK=false
     return 0
 }
 
@@ -279,10 +284,14 @@ DEBUG_goto_next_valid_instruction() {
     done
 
     [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
+    # We cannot stop on a else statement, if so then go to fi
     [[ "$DEBUG_CURRENT_INSTRUCTION" == "else" ]] && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
+    # If we've already gone into an elif statement, then the DEBUG_IF_TEST_OK var is to true. We don't want to go into another one so goto_fi
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && $DEBUG_IF_TEST_OK && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
 }
 
 DEBUG_current_instruction_is_valid() {
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "fi" ]] && DEBUG_IF_TEST_OK=false
     #               SKIP BREAKPOINT                                    SKIP EMPTY LINES               
     [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]] && \
     #             SKIP COMMENTED LINES                            SKIP LINES STARTING WITH '{'
