@@ -90,6 +90,15 @@ add_end_array() {
   eval "$arrayname+=( \"\$val\" )"
 }
 
+##
+# Function that pop the first element of an array
+# $1 : The array
+##
+pop_array() {
+    local arrayname=${1:?Array name required}
+    eval "$arrayname=( \"\${$arrayname[@]:1}\" )"
+}
+
 ################################################################################
 #
 #   INTERNAL FRAMEWORK FUNCTIONS

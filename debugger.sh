@@ -119,10 +119,10 @@ DEBUG_init_internal_variables() {
     fi
 
     DEBUG_PREVIOUS_USER_COMMAND=""
-    DEBUG_CURRENT_LINE_NUMBER=$((${BASH_LINENO[1]} + 1))
+    DEBUG_CURRENT_LINE_NUMBER=${BASH_LINENO[1]}
     DEBUG_CURRENT_INSTRUCTION=""
     DEBUG_CONTINUE=true
-    DEBUG_IF_TEST_OK=false
+    DEBUG_CURRENT_IF_PASSED=()
 }
 ##
 # Function that displays lines around the current line
@@ -151,7 +151,7 @@ DEBUG_display_stacktrace() {
     local -i start=1
     local -i end=$((${#DEBUG_CURRENT_SOURCE[@]}-3))
 
-    echo -e "\n\tStacktrace (last called is first):" 1>&2
+    echo -e "\tStacktrace (last called is first):" 1>&2
 
     echo -e "\t\t${DEBUG_CURRENT_FUNCTION[0]}() in ${DEBUG_CURRENT_SOURCE[0]}:${DEBUG_CURRENT_LINE_NUMBER}" 1>&2
     for ((i=${start}; i < ${end}; i++)); do
@@ -161,6 +161,7 @@ DEBUG_display_stacktrace() {
         local line="${DEBUG_CURRENT_LINENO[$j]}"
         echo -e "\t\t${function}() in ${file}:${line}" 1>&2
     done
+    echo ""
 }
 
 ##
@@ -212,10 +213,12 @@ DEBUG_next_instruction() {
 DEBUG_execute_current_instruction() {
     eval DEBUG_set_args_in_current_instruction "${DEBUG_CURRENT_ARGS[0]}"
     if [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] || [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]]; then
+        [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] && push_into_array DEBUG_CURRENT_IF_PASSED false
         if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^if//" -e "s/^elif//" -e "s/then$//") ; then
             DEBUG_goto_else_elif
-        else #Case when go into the current if/elif
-            DEBUG_IF_TEST_OK=true
+        else 
+            #Case when go into the current if/elif
+            DEBUG_CURRENT_IF_PASSED[0]=true
         fi
     else
         eval "$DEBUG_CURRENT_INSTRUCTION"
@@ -242,14 +245,16 @@ DEBUG_goto_else_elif() {
 
     while [ $if_depth != 0 ]; do
         DEBUG_goto_next_line
-        current_line=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
-        [[ $current_line == if* ]] && if_depth=$((if_depth+1))
-        [[ $current_line == fi ]] && if_depth=$((if_depth-1))
-        [[ $current_line == elif* ]] && if_depth=$((if_depth-1))
-        [[ $current_line == else* ]] && if_depth=$((if_depth-1))
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == "if "* ]] && if_depth=$((if_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == fi ]] && if_depth=$((if_depth-1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == "elif "* ]] && if_depth=$((if_depth-1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == else ]] && if_depth=$((if_depth-1))
     done
     
-    [[ $current_line == elif* ]] && DEBUG_goto_previous_line
+    [[ $DEBUG_CURRENT_INSTRUCTION == "elif "* ]] && DEBUG_goto_previous_line
+    [[ $DEBUG_CURRENT_INSTRUCTION == else ]] && DEBUG_CURRENT_IF_PASSED[0]=true
+    [[ $DEBUG_CURRENT_INSTRUCTION == fi ]] && pop_array DEBUG_CURRENT_IF_PASSED
     return 0
 }
 
@@ -262,12 +267,12 @@ DEBUG_goto_fi() {
 
     while [ $if_depth != 0 ]; do
         DEBUG_goto_next_line
-        current_line=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
-        [[ $current_line == if* ]] && if_depth=$((if_depth+1))
-        [[ $current_line == fi ]] && if_depth=$((if_depth-1))
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == "if "* ]] && if_depth=$((if_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == fi ]] && if_depth=$((if_depth-1))
     done
     
-    DEBUG_IF_TEST_OK=false
+    pop_array DEBUG_CURRENT_IF_PASSED
     return 0
 }
 
@@ -276,27 +281,31 @@ DEBUG_goto_fi() {
 #   the next valid instruction
 ##
 DEBUG_goto_next_valid_instruction() {
-    [ ! -z "$DEBUG_CURRENT_INSTRUCTION" ] && DEBUG_goto_next_line
-    DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
+    DEBUG_goto_next_line
     while ! DEBUG_current_instruction_is_valid; do
+        DEBUG_process_control_statements
         DEBUG_goto_next_line
-        DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
     done
+
+    DEBUG_process_control_statements
+}
+
+DEBUG_process_control_statements() {
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "fi" ]] && pop_array DEBUG_CURRENT_IF_PASSED
 
     [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
     # We cannot stop on a else statement, if so then go to fi
     [[ "$DEBUG_CURRENT_INSTRUCTION" == "else" ]] && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
-    # If we've already gone into an elif statement, then the DEBUG_IF_TEST_OK var is to true. We don't want to go into another one so goto_fi
-    [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && $DEBUG_IF_TEST_OK && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
+    # If we've already gone into an elif statement, then the ${DEBUG_CURRENT_IF_PASSED[0]} var is to true. We don't want to go into another one so goto_fi
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && ${DEBUG_CURRENT_IF_PASSED[0]} && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
 }
 
 DEBUG_current_instruction_is_valid() {
-    [[ "$DEBUG_CURRENT_INSTRUCTION" == "fi" ]] && DEBUG_IF_TEST_OK=false
     #               SKIP BREAKPOINT                                    SKIP EMPTY LINES               
     [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]] && \
     #             SKIP COMMENTED LINES                            SKIP LINES STARTING WITH '{'
     [[ "$DEBUG_CURRENT_INSTRUCTION" != \#* ]] && [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" != "{" ]] && \
-    #
+    #              SKIP then                                        SKIP fi
     [[ "$DEBUG_CURRENT_INSTRUCTION" != "then" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "fi" ]]
 }
 
@@ -313,6 +322,7 @@ DEBUG_continue() {
 ##
 DEBUG_goto_previous_line() {
     DEBUG_CURRENT_LINE_NUMBER=$((DEBUG_CURRENT_LINE_NUMBER-1))
+    DEBUG_set_surrent_instruction
 }
 
 ##
@@ -320,6 +330,14 @@ DEBUG_goto_previous_line() {
 ##
 DEBUG_goto_next_line() {
     DEBUG_CURRENT_LINE_NUMBER=$((DEBUG_CURRENT_LINE_NUMBER+1))
+    DEBUG_set_surrent_instruction
+}
+
+##
+# Function that set the current instruction according to the current file and line number
+##
+DEBUG_set_surrent_instruction() {
+    DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
 }
 
 DEBUG_step_out_function() {
@@ -327,14 +345,10 @@ DEBUG_step_out_function() {
     DEBUG_CURRENT_LINE_NUMBER=${DEBUG_CURRENT_LINENO[0]}
     
     # Re-align the current stack by removing the current element
-    unset DEBUG_CURRENT_ARGS[0]
-    unset DEBUG_CURRENT_SOURCE[0]
-    unset DEBUG_CURRENT_LINENO[0]
-    unset DEBUG_CURRENT_FUNCTION[0]
-    DEBUG_CURRENT_ARGS=("${DEBUG_CURRENT_ARGS[@]}")
-    DEBUG_CURRENT_SOURCE=("${DEBUG_CURRENT_SOURCE[@]}")
-    DEBUG_CURRENT_LINENO=("${DEBUG_CURRENT_LINENO[@]}")
-    DEBUG_CURRENT_FUNCTION=("${DEBUG_CURRENT_FUNCTION[@]}")
+    pop_array DEBUG_CURRENT_ARGS
+    pop_array DEBUG_CURRENT_SOURCE
+    pop_array DEBUG_CURRENT_LINENO
+    pop_array DEBUG_CURRENT_FUNCTION
 
     # If True then we are at the end of the main
     if [[ ${DEBUG_CURRENT_SOURCE[0]} == *scriptFramework.sh ]]; then
