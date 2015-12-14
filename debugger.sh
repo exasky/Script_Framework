@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.5
+#   Version:    1.6
 #
 #   Change log:
 #       V0.1 : Initial
@@ -19,10 +19,11 @@
 #                    an inner-function
 #       V1.4 : Add "argument processing" when stepping in
 #       V1.5 : IF processing
+#       V1.6 : WHILE processing
 #
 #
-#   WARNING: The debugger does not work with keywords: while, for, etc..
-#            To use only for print/modify variables or for simple parts
+#   WARNING: The debugger does not work with keywords: for, switch, until
+#            To use only on simple/medium complexity parts
 #
 ################################################################################
 
@@ -208,18 +209,31 @@ DEBUG_next_instruction() {
 }
 
 ##
-# Function that execute the current instruction 
+# Function that execute the current instruction
+# Here are defined keywords where the user can be stop on
 ##
 DEBUG_execute_current_instruction() {
+    # Set args in DEBUG_CURRENT_INSTRUCTION
     eval DEBUG_set_args_in_current_instruction "${DEBUG_CURRENT_ARGS[0]}"
+    
     if [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] || [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]]; then
         [[ "$DEBUG_CURRENT_INSTRUCTION" == "if "* ]] && push_into_array DEBUG_CURRENT_IF_PASSED false
         if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^if//" -e "s/^elif//" -e "s/then$//") ; then
-            DEBUG_goto_else_elif
+            DEBUG_goto_next_else_elif
         else 
             #Case when go into the current if/elif
             DEBUG_CURRENT_IF_PASSED[0]=true
         fi
+    elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "while "* ]] ; then
+        if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^while //" -e "s/do$//") ; then
+            DEBUG_goto_done
+        fi
+    elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "break" ]] ; then
+        DEBUG_goto_done
+    elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "continue" ]] ; then
+        DEBUG_goto_previous_loop_statement
+        # GOTO previous line because when stepping out of this function -> goto next line
+        DEBUG_goto_previous_line
     else
         eval "$DEBUG_CURRENT_INSTRUCTION"
     fi
@@ -239,9 +253,8 @@ DEBUG_set_args_in_current_instruction() {
 ##
 # Function that go to the next else of elif statement  
 ##
-DEBUG_goto_else_elif() {
+DEBUG_goto_next_else_elif() {
     local if_depth=1
-    local current_line
 
     while [ $if_depth != 0 ]; do
         DEBUG_goto_next_line
@@ -261,9 +274,8 @@ DEBUG_goto_else_elif() {
 ##
 # Function that go to the next fi statement  
 ##
-DEBUG_goto_fi() {
+DEBUG_goto_fi_statement() {
     local if_depth=1
-    local current_line
 
     while [ $if_depth != 0 ]; do
         DEBUG_goto_next_line
@@ -276,12 +288,41 @@ DEBUG_goto_fi() {
     return 0
 }
 
+DEBUG_goto_previous_loop_statement() {
+    local done_depth=1
+
+    while [ $done_depth != 0 ]; do
+        DEBUG_goto_previous_line
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == "while "* ]] && done_depth=$((done_depth-1))
+        #[[ $DEBUG_CURRENT_INSTRUCTION == "for "* ]] && done_depth=$((done_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == done ]] && done_depth=$((done_depth+1))
+    done
+
+    return 0
+}
+
+DEBUG_goto_done() {
+    local done_depth=1
+
+    while [ $done_depth != 0 ]; do
+        DEBUG_goto_next_line
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == "while "* ]] && done_depth=$((done_depth+1))
+        #[[ $DEBUG_CURRENT_INSTRUCTION == "for "* ]] && done_depth=$((done_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == done ]] && done_depth=$((done_depth-1))
+    done
+    
+    return 0
+}
+
 ##
 # Function that set the DEBUG_CURRENT_INSTRUCTION variable by retrieving
 #   the next valid instruction
 ##
 DEBUG_goto_next_valid_instruction() {
     DEBUG_goto_next_line
+
     while ! DEBUG_current_instruction_is_valid; do
         DEBUG_process_control_statements
         DEBUG_goto_next_line
@@ -290,23 +331,36 @@ DEBUG_goto_next_valid_instruction() {
     DEBUG_process_control_statements
 }
 
+##
+# Function that process end of statements
+#   For example: fi, done
+##
 DEBUG_process_control_statements() {
     [[ "$DEBUG_CURRENT_INSTRUCTION" == "fi" ]] && pop_array DEBUG_CURRENT_IF_PASSED
-
-    [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
     # We cannot stop on a else statement, if so then go to fi
-    [[ "$DEBUG_CURRENT_INSTRUCTION" == "else" ]] && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "else" ]] && DEBUG_goto_fi_statement && DEBUG_goto_next_valid_instruction
     # If we've already gone into an elif statement, then the ${DEBUG_CURRENT_IF_PASSED[0]} var is to true. We don't want to go into another one so goto_fi
-    [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && ${DEBUG_CURRENT_IF_PASSED[0]} && DEBUG_goto_fi && DEBUG_goto_next_valid_instruction
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && ${DEBUG_CURRENT_IF_PASSED[0]} && DEBUG_goto_fi_statement && DEBUG_goto_next_valid_instruction
+    
+    # We cannot stop on a done statement, if so then go corresponding for or while
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "done" ]] && DEBUG_goto_previous_loop_statement    
+    
+    [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
 }
 
+##
+# Function that check if the current instruction is a valid one
+#   Commented lines, empty lines, ... Are incorrect
+##
 DEBUG_current_instruction_is_valid() {
     #               SKIP BREAKPOINT                                    SKIP EMPTY LINES               
     [[ "$DEBUG_CURRENT_INSTRUCTION" != "breakpoint" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "" ]] && \
     #             SKIP COMMENTED LINES                            SKIP LINES STARTING WITH '{'
     [[ "$DEBUG_CURRENT_INSTRUCTION" != \#* ]] && [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" != "{" ]] && \
     #              SKIP then                                        SKIP fi
-    [[ "$DEBUG_CURRENT_INSTRUCTION" != "then" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "fi" ]]
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "then" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "fi" ]] && \
+    #              SKIP do
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "do" ]]
 }
 
 ##
