@@ -41,7 +41,8 @@ complex_case(){
     mycase="case_pattern"
     
     case $mycase in
-        *pattern ) echo "CASE1"
+        *pattern )
+            echo "CASE1"
             ;;
         case* )
             echo "CASE2"
@@ -56,7 +57,8 @@ case_in_case() {
     mycase="case3"
     
     case $mycase in
-        "case1" ) echo "CASE1"
+        "case1" )
+            echo "CASE1"
             ;;
         "case2" )
             echo "CASE2"
@@ -64,7 +66,8 @@ case_in_case() {
         "case3" )
             innercase="innercase"
             case $innercase in
-                "case1" ) echo "CASE1"
+                "case1" ) 
+                    echo "CASE1"
                     ;;
                 "innercase" )
                     echo "INNER CASE"
@@ -79,7 +82,8 @@ none_case() {
     mycase="none"
     
     case $mycase in
-        *pattern ) echo "CASE1"
+        *pattern )
+            echo "CASE1"
             ;;
         "case3" )
             echo "CASE3"
