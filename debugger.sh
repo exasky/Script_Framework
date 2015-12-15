@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.6
+#   Version:    1.7
 #
 #   Change log:
 #       V0.1 : Initial
@@ -20,10 +20,17 @@
 #       V1.4 : Add "argument processing" when stepping in
 #       V1.5 : IF processing
 #       V1.6 : WHILE processing
+#       V1.7 : CASE processing
 #
 #
-#   WARNING: The debugger does not work with keywords: for, switch, until
+#   WARNING: The debugger does not work with keywords: for, until
 #            To use only on simple/medium complexity parts
+#            When debugging 'case' statements, please follow this syntax:
+#               case "myvar" in
+#                   expr1 )
+#                       [instructions]
+#                       ;;
+#                   expr2 ) ...
 #
 ################################################################################
 
@@ -58,11 +65,11 @@ breakpoint() {
             c )        DEBUG_continue;;
             cls )      clear;;
             h | help)  DEBUG_display_breakpoint_help;;
-            l | list)  DEBUG_display_around_lines;;
             n | next)  DEBUG_next_instruction;;
             q | quit)  DEBUG_BREAKPOINT_ACTIVATED=false; break;;
             s | step)  DEBUG_step_in;;
             t | stack) DEBUG_display_stacktrace;;
+            l | "l "* | list)  DEBUG_display_around_lines $user_command;;
             \$* )      eval "echo $user_command";;
             * )        eval $user_command;;
         esac
@@ -88,8 +95,8 @@ DEBUG_display_breakpoint_help() {
     echo -e "cls:\t To clear the screen"
     echo -e "Enter:\t Re-execute the last command"
     echo
-    logSWarn "WARNING: The debugger does not work with keywords: while, for, etc.."
-    logSWarn "\t To use only for print/modify variables or for simple parts"
+    logSWarn "WARNING: The debugger does not work with keywords: for & until"
+    logSWarn "\t To use only on simple/medium complexity parts"
 }
 
 DEBUG_init_internal_variables() {
@@ -118,26 +125,33 @@ DEBUG_init_internal_variables() {
         DEBUG_CURRENT_FUNCTION=("${FUNCNAME[@]:2}")
         DEBUG_CURRENT_LINENO=("${BASH_LINENO[@]:2}")
     fi
+    
+    DEBUG_CURRENT_DISPLAY_OFFSET=5
 
     DEBUG_PREVIOUS_USER_COMMAND=""
     DEBUG_CURRENT_LINE_NUMBER=${BASH_LINENO[1]}
     DEBUG_CURRENT_INSTRUCTION=""
     DEBUG_CONTINUE=true
     DEBUG_CURRENT_IF_PASSED=()
+    
+    DEBUG_CURRENT_CASE_VALUE=""
+    DEBUG_IN_CASE_SWITCH=false
 }
+
 ##
 # Function that displays lines around the current line
 ##
 DEBUG_display_around_lines() {
     local current_file="${DEBUG_CURRENT_SOURCE[0]}"
     local current_line_number="$DEBUG_CURRENT_LINE_NUMBER"
+    [[ ! -z $2 ]] && DEBUG_CURRENT_DISPLAY_OFFSET=$2
     
     # This is used to avoid errors when the first line is < 3
     local first_line=$((current_line_number-3))
     local middle=$((first_line + 3))
     [ $first_line -lt 1 ] && first_line=1 && middle=$DEBUG_CURRENT_LINE_NUMBER
     
-    for (( i=${first_line}; i <= $((current_line_number + 5)); i++)); do
+    for (( i=${first_line}; i <= $((current_line_number + DEBUG_CURRENT_DISPLAY_OFFSET)); i++)); do
         printf "$i."
         [[ "$i" == "$middle" ]] && printf " >"
         printf "\t"
@@ -234,6 +248,17 @@ DEBUG_execute_current_instruction() {
         DEBUG_goto_previous_loop_statement
         # GOTO previous line because when stepping out of this function -> goto next line
         DEBUG_goto_previous_line
+    elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "case "* ]] ; then
+        DEBUG_CURRENT_CASE_VALUE=$(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^case //" -e "s/in$//")
+        DEBUG_IN_CASE_SWITCH=true
+    elif $DEBUG_IN_CASE_SWITCH; then
+        if ! eval [[ $DEBUG_CURRENT_CASE_VALUE == "$(echo $DEBUG_CURRENT_INSTRUCTION | sed "s/\(.*\))/\1/")" ]] ; then
+            DEBUG_goto_next_case
+        else
+            #Case when go into the current switch case
+            DEBUG_IN_CASE_SWITCH=false
+            DEBUG_CURRENT_CASE_VALUE=""
+        fi
     else
         eval "$DEBUG_CURRENT_INSTRUCTION"
     fi
@@ -288,6 +313,41 @@ DEBUG_goto_fi_statement() {
     return 0
 }
 
+##
+# Function that go to the next case statement in the current switch
+##
+DEBUG_goto_next_case() {
+    local case_depth=1
+
+    while [ $case_depth != 0 ]; do
+        DEBUG_goto_next_line
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == *"\)" ]] && case_depth=$((case_depth-1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == ";;" ]] && case_depth=$((case_depth-1))
+    done
+
+    return 0
+}
+
+##
+# Function that go to the next esac statement in the current switch
+##
+DEBUG_goto_esac_statement() {
+    local case_depth=1
+
+    while [ $case_depth != 0 ]; do
+        DEBUG_goto_next_line
+
+        [[ $DEBUG_CURRENT_INSTRUCTION == "case" ]] && case_depth=$((case_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == "esac" ]] && case_depth=$((case_depth-1))
+    done
+
+    return 0
+}
+
+##
+# Function that go to the current loop statement
+##
 DEBUG_goto_previous_loop_statement() {
     local done_depth=1
 
@@ -302,6 +362,9 @@ DEBUG_goto_previous_loop_statement() {
     return 0
 }
 
+##
+# Function that go to the 'done' statement
+##
 DEBUG_goto_done() {
     local done_depth=1
 
@@ -342,8 +405,12 @@ DEBUG_process_control_statements() {
     # If we've already gone into an elif statement, then the ${DEBUG_CURRENT_IF_PASSED[0]} var is to true. We don't want to go into another one so goto_fi
     [[ "$DEBUG_CURRENT_INSTRUCTION" == "elif "* ]] && ${DEBUG_CURRENT_IF_PASSED[0]} && DEBUG_goto_fi_statement && DEBUG_goto_next_valid_instruction
     
+    # We cannot stop on a ;; statement, if so then go to esac
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == ";;" ]] && DEBUG_goto_esac_statement && DEBUG_goto_next_valid_instruction
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "esac" ]] && DEBUG_IN_CASE_SWITCH=false && DEBUG_CURRENT_CASE_VALUE=""
+    
     # We cannot stop on a done statement, if so then go corresponding for or while
-    [[ "$DEBUG_CURRENT_INSTRUCTION" == "done" ]] && DEBUG_goto_previous_loop_statement    
+    [[ "$DEBUG_CURRENT_INSTRUCTION" == "done" ]] && DEBUG_goto_previous_loop_statement
     
     [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" == "}" ]] && DEBUG_step_out_function
 }
@@ -359,8 +426,8 @@ DEBUG_current_instruction_is_valid() {
     [[ "$DEBUG_CURRENT_INSTRUCTION" != \#* ]] && [[ "${DEBUG_CURRENT_INSTRUCTION//[[:blank:]]/}" != "{" ]] && \
     #              SKIP then                                        SKIP fi
     [[ "$DEBUG_CURRENT_INSTRUCTION" != "then" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "fi" ]] && \
-    #              SKIP do
-    [[ "$DEBUG_CURRENT_INSTRUCTION" != "do" ]]
+    #              SKIP do                                      SKIP esac   
+    [[ "$DEBUG_CURRENT_INSTRUCTION" != "do" ]] && [[ "$DEBUG_CURRENT_INSTRUCTION" != "esac" ]] 
 }
 
 ##
@@ -394,6 +461,9 @@ DEBUG_set_surrent_instruction() {
     DEBUG_CURRENT_INSTRUCTION=$(sed -e "$DEBUG_CURRENT_LINE_NUMBER"'!d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' ${DEBUG_CURRENT_SOURCE[0]})
 }
 
+##
+# Function that step out from the current function
+##
 DEBUG_step_out_function() {
     # DEBUG_CURRENT_LINENO[0] correspond to the current line of the upper function
     DEBUG_CURRENT_LINE_NUMBER=${DEBUG_CURRENT_LINENO[0]}
