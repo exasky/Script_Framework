@@ -27,7 +27,10 @@ Implements at least these functions:
                It doesn't apply for declare_env, check_env & declare_source
     The function "logError" set an error flag that is used by "error_happened?" function
     To use the debugger part, you juste have to call "breakpoint" function at any line of your script
-        @ Do not call 'breakpoint' before an if, while, for, etc.. (NOT SUPPORTED YET)
+        @ Do not call 'breakpoint' before n for or until (NOT SUPPORTED YET)
+    Make clean code
+        @ Do not write a comment on the same line than another instruction
+        @ Make line breaks
 
 ## Change log:
 - V0.1 : Initial
