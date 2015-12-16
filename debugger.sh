@@ -2,7 +2,7 @@
 #   Welcome in the debugger part of this framework
 #
 #   Author:     SIMAR Jeremy
-#   Version:    1.7
+#   Version:    1.8
 #
 #   Change log:
 #       V0.1 : Initial
@@ -21,16 +21,17 @@
 #       V1.5 : IF processing
 #       V1.6 : WHILE processing
 #       V1.7 : CASE processing
+#       V1.8 : UNTIL processing
 #
 #
-#   WARNING: The debugger does not work with keywords: for, until
+#   WARNING: The debugger does not work with keywords: for
 #            To use only on simple/medium complexity parts
 #            When debugging 'case' statements, please follow this syntax:
 #               case "myvar" in
-#                   expr1 )
+#                   expr1 ) "\n"
 #                       [instructions]
 #                       ;;
-#                   expr2 ) ...
+#                   expr2 ) "\n" ...
 #
 ################################################################################
 
@@ -95,7 +96,7 @@ DEBUG_display_breakpoint_help() {
     echo -e "cls:\t To clear the screen"
     echo -e "Enter:\t Re-execute the last command"
     echo
-    logSWarn "WARNING: The debugger does not work with keywords: for & until"
+    logSWarn "WARNING: The debugger does not work with keywords: for"
     logSWarn "\t To use only on simple/medium complexity parts"
 }
 
@@ -242,6 +243,10 @@ DEBUG_execute_current_instruction() {
         if ! eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^while //" -e "s/do$//") ; then
             DEBUG_goto_done
         fi
+    elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "until "* ]] ; then
+        if eval $(echo $DEBUG_CURRENT_INSTRUCTION | sed -e "s/^until //" -e "s/do$//") ; then
+            DEBUG_goto_done
+        fi
     elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "break" ]] ; then
         DEBUG_goto_done
     elif [[ "$DEBUG_CURRENT_INSTRUCTION" == "continue" ]] ; then
@@ -355,6 +360,7 @@ DEBUG_goto_previous_loop_statement() {
         DEBUG_goto_previous_line
 
         [[ $DEBUG_CURRENT_INSTRUCTION == "while "* ]] && done_depth=$((done_depth-1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == "until "* ]] && done_depth=$((done_depth-1))
         #[[ $DEBUG_CURRENT_INSTRUCTION == "for "* ]] && done_depth=$((done_depth+1))
         [[ $DEBUG_CURRENT_INSTRUCTION == done ]] && done_depth=$((done_depth+1))
     done
@@ -372,6 +378,7 @@ DEBUG_goto_done() {
         DEBUG_goto_next_line
 
         [[ $DEBUG_CURRENT_INSTRUCTION == "while "* ]] && done_depth=$((done_depth+1))
+        [[ $DEBUG_CURRENT_INSTRUCTION == "until "* ]] && done_depth=$((done_depth+1))
         #[[ $DEBUG_CURRENT_INSTRUCTION == "for "* ]] && done_depth=$((done_depth+1))
         [[ $DEBUG_CURRENT_INSTRUCTION == done ]] && done_depth=$((done_depth-1))
     done
