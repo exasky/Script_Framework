@@ -11,8 +11,8 @@
 #
 ################################################################################
 
-FW_PATH=$(cd "$(dirname "$0")" && pwd -P)"/scriptFramework.sh"
-
+FW_PATH=$(cd "$(dirname "$0")" && pwd -P)
+FW_PATH="${FW_PATH%/*}/scriptFramework.sh"
 source $FW_PATH
 
 usage() {

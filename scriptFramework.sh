@@ -105,8 +105,8 @@ pop_array() {
 #
 ################################################################################
 SF_declare_env() {
-    local PATH_TO_FW="${BASH_SOURCE[0]%/*}"
-
+    local PATH_TO_FW="${BASH_SOURCE[0]%/*}/lib"
+    
     source "$PATH_TO_FW/logFunctions.sh"
     source "$PATH_TO_FW/debugger.sh" "$@"
     source "$PATH_TO_FW/error.sh"
