@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 ################################################################################
 #   Welcome in the main part of this framework
 #       See README for more informations

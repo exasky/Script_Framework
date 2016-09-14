@@ -1,4 +1,5 @@
-source "../../scriptFramework.sh"
+#!/bin/bash
+. "../../scriptFramework.sh"
 
 function declare_source  () 
  {
